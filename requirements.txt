@@ -1,0 +1,5 @@
+flask>=2.3.0
+gunicorn>=21.2.0
+Pillow>=10.0.0
+pyzbar>=0.1.9
+pyotp>=2.9.0

@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  google-auth-exporter:
+    build: .
+    container_name: google-auth-exporter
+    ports:
+      - "5080:5000"
+    restart: unless-stopped
+    volumes:
+      - /data/google-authenticator-exporter:/data
+    environment:
+      - PORT=5000
+      - RATE_LIMIT_DAILY=10
+      - RATE_LIMIT_MONTHLY=100
+      - RATE_LIMIT_YEARLY=200
