@@ -12,14 +12,22 @@ Google Authenticator 数据解码与 TOTP 动态码生成工具，基于 Flask �
 | 📷 **图片上传** | 直接上传二维码图片（支持 PNG/JPG，最大 16MB） |
 | 📋 **URI 粘贴** | 粘贴 `otpauth-migration://offline?data=...` URI |
 | ⌨️ **全局 Ctrl+V** | 页面任意位置粘贴，自动识别图片/文本并切换 Tab |
-| 🔌 **REST API** | `POST /decode` 和 `POST /generate` 接口，支持程序化调用 |
-| 🔑 **TOTP 生成** | 根据 Secret Key 生成 TOTP 动态验证码 |
+| 🔌 **REST API** | `POST /decode`、`POST /generate`、`POST /generate/batch` 接口 |
+| 🔑 **TOTP 生成** | 根据 Secret Key 生成 TOTP 动态验证码，支持倒计时和自动刷新 |
+| 📦 **批量生成** | 批量生成多个 Secret 的动态码，一次性验证多个账户 |
+| 📱 **二维码生成** | 前端生成 otpauth 二维码，可下载导入其他验证器 |
 | 🐳 **Docker 部署** | docker-compose 一键部署，支持挂载目录 |
 | 🐍 **纯 Python** | 手动解码 protobuf，无需安装 grpcio-tools |
 | 🎨 **莫兰迪色系 UI** | Material Design 3 风格，柔和自然色调 |
 | 🌐 **中文界面** | 全中文化 Web 界面 |
 | 🛡️ **速率限制** | IP 级限流（每天50次），SQLite 存储 |
 | 📊 **用量统计** | 自动记录每个 IP 的请求次数，跨天自动清零 |
+
+## 安全原则
+
+- **不在后端存储用户的 Secret** — Secret 仅在请求时用于计算，不写入任何数据库或文件
+- **Secret 不记录日志** — 所有计算在服务端完成后立即丢弃 Secret
+- **二维码在前端生成** — 生成二维码时 Secret 不发送到后端
 
 ## 快速开始
 
@@ -51,7 +59,24 @@ curl -X POST http://localhost:5080/decode \
   -F "file=@qrcode.png"
 ```
 
-### 生成 TOTP 动态码
+#### 响应示例
+
+```json
+{
+  "accounts": [
+    {
+      "name": "alice@example.com",
+      "issuer": "Google",
+      "secret_base32": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "type": "TOTP"
+    }
+  ]
+}
+```
+
+### 生成单个 TOTP 动态码
 
 ```bash
 # 使用默认参数（SHA1, 6位, 30秒）
@@ -89,6 +114,90 @@ curl -X POST http://localhost:5080/generate \
   "period": 30,
   "remaining_seconds": 25,
   "remaining_percent": 83.3
+}
+```
+
+### 批量生成 TOTP 动态码
+
+一次请求生成多个 Secret 的动态码，批量请求只计一次速率限制。
+
+```bash
+curl -X POST http://localhost:5080/generate/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {"secret": "JBSWY3DPEHPK3PXP"},
+      {"secret": "GEZDGNBVGY3TQOJQ", "algorithm": "SHA256", "digits": 8},
+      {"secret": "INVALID_KEY"}
+    ]
+  }'
+```
+
+#### 请求参数
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `items` | array | 是 | Secret 列表，最多 20 个 |
+| `items[].secret` | string | 是 | Base32 编码的 Secret Key |
+| `items[].algorithm` | string | 否 | 算法，默认 SHA1 |
+| `items[].digits` | integer | 否 | 位数，默认 6 |
+| `items[].period` | integer | 否 | 周期（秒），默认 30 |
+
+#### 响应示例
+
+```json
+{
+  "results": [
+    {
+      "index": 0,
+      "code": "123456",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "remaining_seconds": 25,
+      "remaining_percent": 83.3
+    },
+    {
+      "index": 1,
+      "code": "12345678",
+      "algorithm": "SHA256",
+      "digits": 8,
+      "period": 30,
+      "remaining_seconds": 18,
+      "remaining_percent": 60.0
+    },
+    {
+      "index": 2,
+      "error": "Invalid secret key format (must be base32 encoded)"
+    }
+  ]
+}
+```
+
+### 错误码说明
+
+| HTTP 状态码 | 说明 |
+|------------|------|
+| `200` | 成功 |
+| `400` | 请求参数错误（缺少参数、格式无效等） |
+| `429` | 超出速率限制，响应中包含 `retry_after` 字段 |
+| `500` | 服务器内部错误 |
+
+#### 错误响应格式
+
+```json
+{
+  "error": "错误描述信息"
+}
+```
+
+速率限制错误：
+
+```json
+{
+  "error": "Daily limit reached (50/day)",
+  "limits": {"daily": "50/50"},
+  "retry_after": "tomorrow"
 }
 ```
 

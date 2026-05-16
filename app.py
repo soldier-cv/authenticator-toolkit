@@ -464,6 +464,84 @@ def generate():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/generate/batch', methods=['POST'])
+def generate_batch():
+    """Generate TOTP codes for multiple secrets. Rate limit counts as one request."""
+    try:
+        # Rate limit check — batch counts as one request
+        client_ip = get_client_ip()
+        allowed, error_msg, limits_info = rate_limiter.check_and_record(client_ip)
+        if not allowed:
+            return jsonify({
+                'error': error_msg,
+                'limits': limits_info,
+                'retry_after': 'tomorrow'
+            }), 429
+
+        data = request.get_json(silent=True) or {}
+        items = data.get('items', [])
+
+        if not items:
+            return jsonify({'error': 'items array is required'}), 400
+
+        if len(items) > 20:
+            return jsonify({'error': 'Maximum 20 items per batch request'}), 400
+
+        algo_map = {
+            'SHA1': 'sha1',
+            'SHA256': 'sha256',
+            'SHA512': 'sha512',
+            'MD5': 'md5'
+        }
+
+        results = []
+        for idx, item in enumerate(items):
+            entry = {'index': idx}
+            try:
+                secret = (item.get('secret') or '').strip()
+                if not secret:
+                    raise ValueError('Secret key is required')
+
+                # Validate base32
+                try:
+                    base64.b32decode(secret + '=' * (-len(secret) % 4))
+                except Exception:
+                    raise ValueError('Invalid secret key format (must be base32 encoded)')
+
+                algorithm = item.get('algorithm', 'SHA1').upper()
+                if algorithm not in ('SHA1', 'SHA256', 'SHA512', 'MD5'):
+                    raise ValueError(f'Unsupported algorithm: {algorithm}')
+
+                digits = int(item.get('digits', 6))
+                if digits not in (6, 7, 8):
+                    raise ValueError(f'Invalid digits: {digits}')
+
+                period = int(item.get('period', 30))
+                if period <= 0 or period > 300:
+                    raise ValueError(f'Invalid period: {period}')
+
+                totp = pyotp.TOTP(secret, digits=digits, digest=algo_map.get(algorithm, 'sha1'), interval=period)
+                current_code = totp.now()
+                remaining = totp.interval - (datetime.utcnow().timestamp() % totp.interval)
+
+                entry['code'] = current_code
+                entry['algorithm'] = algorithm
+                entry['digits'] = digits
+                entry['period'] = period
+                entry['remaining_seconds'] = int(remaining)
+                entry['remaining_percent'] = round((remaining / period) * 100, 1)
+
+            except Exception as e:
+                entry['error'] = str(e)
+
+            results.append(entry)
+
+        return jsonify({'results': results}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok'})
