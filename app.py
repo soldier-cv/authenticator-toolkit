@@ -104,6 +104,9 @@ class RateLimiter:
             conn.close()
 
 
+import time as _time
+_start_time = _time.time()
+
 rate_limiter = RateLimiter(DB_PATH)
 
 
@@ -544,7 +547,30 @@ def generate_batch():
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok'})
+    """Health check endpoint with diagnostics for Docker HEALTHCHECK and monitoring."""
+    import time
+    try:
+        # Verify rate limiter DB is accessible
+        conn = rate_limiter._get_conn()
+        row = conn.execute("SELECT COUNT(*) FROM usage").fetchone()
+        total_records = row[0] if row else 0
+        conn.close()
+        db_ok = True
+    except Exception:
+        db_ok = False
+        total_records = -1
+
+    status_code = 200 if db_ok else 503
+
+    return jsonify({
+        'status': 'ok' if db_ok else 'degraded',
+        'uptime_seconds': int(time.time() - _start_time),
+        'rate_limiter': {
+            'db_healthy': db_ok,
+            'total_records': total_records,
+            'daily_limit': DAILY_LIMIT,
+        },
+    }), status_code
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
