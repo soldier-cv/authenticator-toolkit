@@ -325,7 +325,7 @@ def decode_export_uri(uri):
         data_b64 += '=' * padding
     
     # Base64 decode
-    raw_data = base64.standard_b64decode(data_b64)
+    raw_data = base64.b64decode(data_b64)
     
     # Decode protobuf
     payload = decode_migration_payload(raw_data)
@@ -485,7 +485,15 @@ def generate():
         except (ValueError, TypeError):
             return jsonify({'error': 'period must be an integer'}), 400
 
-        totp = pyotp.TOTP(secret, digits=digits, digest=algorithm.lower(), interval=period)
+        # Map algorithm names to hashlib
+        algo_map = {
+            'SHA1': 'sha1',
+            'SHA256': 'sha256',
+            'SHA512': 'sha512',
+            'MD5': 'md5'
+        }
+
+        totp = pyotp.TOTP(secret, digits=digits, digest=algo_map.get(algorithm, 'sha1'), interval=period)
         current_code = totp.now()
         remaining = totp.interval - (datetime.utcnow().timestamp() % totp.interval)
 
@@ -526,6 +534,13 @@ def generate_batch():
         if len(items) > 20:
             return jsonify({'error': 'Maximum 20 items per batch request'}), 400
 
+        algo_map = {
+            'SHA1': 'sha1',
+            'SHA256': 'sha256',
+            'SHA512': 'sha512',
+            'MD5': 'md5'
+        }
+
         results = []
         for idx, item in enumerate(items):
             entry = {'index': idx}
@@ -552,7 +567,7 @@ def generate_batch():
                 if period <= 0 or period > 300:
                     raise ValueError(f'Invalid period: {period}')
 
-                totp = pyotp.TOTP(secret, digits=digits, digest=algorithm.lower(), interval=period)
+                totp = pyotp.TOTP(secret, digits=digits, digest=algo_map.get(algorithm, 'sha1'), interval=period)
                 current_code = totp.now()
                 remaining = totp.interval - (datetime.utcnow().timestamp() % totp.interval)
 
