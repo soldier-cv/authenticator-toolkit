@@ -3,9 +3,12 @@ services:
   authenticator-toolkit:
     build: .
     container_name: authenticator-toolkit
+    # 宿主 5080 留给反向代理对外监听 (http://100.64.0.88:5080)，容器端口回环绑定到 127.0.0.1:5081 避免与反代监听冲突
     ports:
-      - "5080:5000"
+      - "127.0.0.1:5081:5000"
     restart: unless-stopped
+    env_file:
+      - /home/xl/.hermes/.secrets/authenticator-toolkit.env
     volumes:
       - /data/authenticator-toolkit:/data
     environment:

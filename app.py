@@ -4,19 +4,59 @@ Google Authenticator 数据解码与 TOTP 动态码生成工具
 Based on soldier-cv/google-authenticator-exporter
 """
 import os
+import sys
 import io
 import base64
 import struct
 import sqlite3
 import urllib.parse
+import hmac
 from datetime import datetime
 from functools import wraps
 from flask import Flask, request, render_template, jsonify
 from PIL import Image
 import pyotp
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_httpauth import HTTPBasicAuth
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+
+# ============ Access Authentication (Basic Auth) ============
+_RAW_USER = os.environ.get('TOTP_ACCESS_USER', 'admin')
+_EXPECTED_USER = _RAW_USER.strip() if _RAW_USER and _RAW_USER.strip() else 'admin'
+_RAW_PASSWORD = os.environ.get('TOTP_ACCESS_PASSWORD')
+_RAW_PASSWORD_HASH = os.environ.get('TOTP_ACCESS_PASSWORD_HASH')
+
+_PASSWORD = _RAW_PASSWORD.strip() if _RAW_PASSWORD and _RAW_PASSWORD.strip() else None
+_PASSWORD_HASH = _RAW_PASSWORD_HASH.strip() if _RAW_PASSWORD_HASH and _RAW_PASSWORD_HASH.strip() else None
+
+if not _PASSWORD and not _PASSWORD_HASH:
+    sys.stderr.write("TOTP_ACCESS_PASSWORD (或 TOTP_ACCESS_PASSWORD_HASH) 未配置：拒绝启动（fail-closed）\n")
+    sys.stderr.flush()
+    raise RuntimeError("TOTP_ACCESS_PASSWORD (或 TOTP_ACCESS_PASSWORD_HASH) 未配置：拒绝启动（fail-closed）")
+
+auth = HTTPBasicAuth(realm="Authenticator Toolkit")
+auth.generate_password_hash = generate_password_hash
+auth.check_password_hash = check_password_hash
+
+_EXPECTED_HASH = _PASSWORD_HASH or auth.generate_password_hash(_PASSWORD)
+
+
+@auth.verify_password
+def verify_password(username, password):
+    if not password or not _EXPECTED_HASH:
+        return False
+    user_ok = hmac.compare_digest(username.encode('utf-8'), _EXPECTED_USER.encode('utf-8'))
+    pwd_ok = auth.check_password_hash(_EXPECTED_HASH, password)
+    return bool(user_ok and pwd_ok)
+
+
+@auth.error_handler
+def auth_error(status=401):
+    return jsonify({'error': 'authentication required'}), 401, {
+        'WWW-Authenticate': 'Basic realm="Authenticator Toolkit"'
+    }
 
 # ============ Rate Limiter (SQLite) ============
 # Configurable via environment variables
@@ -285,7 +325,7 @@ def decode_export_uri(uri):
         data_b64 += '=' * padding
     
     # Base64 decode
-    raw_data = base64.b64decode(data_b64)
+    raw_data = base64.standard_b64decode(data_b64)
     
     # Decode protobuf
     payload = decode_migration_payload(raw_data)
@@ -344,10 +384,12 @@ def read_qr_from_image(image_bytes):
 # ============ Flask Routes ============
 
 @app.route('/')
+@auth.login_required
 def index():
     return render_template('index.html')
 
 @app.route('/decode', methods=['POST'])
+@auth.login_required
 def decode():
     try:
         # Rate limit check
@@ -396,6 +438,7 @@ def decode():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/generate', methods=['POST'])
+@auth.login_required
 def generate():
     """Generate TOTP code from secret key."""
     try:
@@ -442,15 +485,7 @@ def generate():
         except (ValueError, TypeError):
             return jsonify({'error': 'period must be an integer'}), 400
 
-        # Map algorithm names to hashlib
-        algo_map = {
-            'SHA1': 'sha1',
-            'SHA256': 'sha256',
-            'SHA512': 'sha512',
-            'MD5': 'md5'
-        }
-
-        totp = pyotp.TOTP(secret, digits=digits, digest=algo_map.get(algorithm, 'sha1'), interval=period)
+        totp = pyotp.TOTP(secret, digits=digits, digest=algorithm.lower(), interval=period)
         current_code = totp.now()
         remaining = totp.interval - (datetime.utcnow().timestamp() % totp.interval)
 
@@ -468,6 +503,7 @@ def generate():
 
 
 @app.route('/generate/batch', methods=['POST'])
+@auth.login_required
 def generate_batch():
     """Generate TOTP codes for multiple secrets. Rate limit counts as one request."""
     try:
@@ -489,13 +525,6 @@ def generate_batch():
 
         if len(items) > 20:
             return jsonify({'error': 'Maximum 20 items per batch request'}), 400
-
-        algo_map = {
-            'SHA1': 'sha1',
-            'SHA256': 'sha256',
-            'SHA512': 'sha512',
-            'MD5': 'md5'
-        }
 
         results = []
         for idx, item in enumerate(items):
@@ -523,7 +552,7 @@ def generate_batch():
                 if period <= 0 or period > 300:
                     raise ValueError(f'Invalid period: {period}')
 
-                totp = pyotp.TOTP(secret, digits=digits, digest=algo_map.get(algorithm, 'sha1'), interval=period)
+                totp = pyotp.TOTP(secret, digits=digits, digest=algorithm.lower(), interval=period)
                 current_code = totp.now()
                 remaining = totp.interval - (datetime.utcnow().timestamp() % totp.interval)
 
