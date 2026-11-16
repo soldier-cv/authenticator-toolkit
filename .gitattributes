@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.py text diff=python
+*.html text diff=html
+*.md text

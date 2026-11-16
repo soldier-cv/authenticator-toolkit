@@ -1,0 +1,33 @@
+# Woodpecker CI — authenticator-toolkit
+# 触发策略：仅 tag (v*) 与 manual，日常 push 不构建
+when:
+  - event: tag
+    ref: refs/tags/v*
+  - event: manual
+
+steps:
+  - name: test
+    image: python:3.11-slim
+    commands:
+      - apt-get update -qq && apt-get install -y -qq --no-install-recommends libzbar0
+      - pip install -q -r requirements.txt pytest
+      - TOTP_ACCESS_PASSWORD=ci_test_pwd RATE_LIMIT_DB=/tmp/ci_test.db pytest -q
+
+  - name: build-and-push
+    image: docker:26-cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      REGISTRY_USER:
+        from_secret: registry_user
+      REGISTRY_PASS:
+        from_secret: registry_pass
+    commands:
+      - |
+        set -eu
+        RELEASE_TAG=$${CI_COMMIT_TAG:-$${deploy_tag:-$${DEPLOY_TAG:-sha-$$(echo $${CI_COMMIT_SHA} | cut -c1-8)}}}
+        docker build -t "100.64.0.88:5000/authenticator-toolkit:$${RELEASE_TAG}" -t "100.64.0.88:5000/authenticator-toolkit:latest" .
+        echo "$$REGISTRY_PASS" | docker login 100.64.0.88:5000 -u "$$REGISTRY_USER" --password-stdin
+        docker push "100.64.0.88:5000/authenticator-toolkit:$${RELEASE_TAG}"
+        docker push "100.64.0.88:5000/authenticator-toolkit:latest"
+        docker logout 100.64.0.88:5000

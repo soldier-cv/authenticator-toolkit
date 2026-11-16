@@ -383,6 +383,10 @@ def read_qr_from_image(image_bytes):
 
 # ============ Flask Routes ============
 
+@app.route('/favicon.ico')
+def favicon():
+    return app.send_static_file('favicon.ico')
+
 @app.route('/')
 @auth.login_required
 def index():

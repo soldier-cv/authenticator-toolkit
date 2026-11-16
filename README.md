@@ -263,6 +263,22 @@ curl -u "admin:your_password_here" -X POST http://100.64.0.88:5080/generate/batc
 | `RATE_LIMIT_DAILY` | 50 | 每日请求上限 |
 | `RATE_LIMIT_DB` | /data/usage.db | SQLite 数据库路径 |
 
+配置模板参见 [.env.example](file:///opt/code/authenticator-toolkit-repo/.env.example)。
+
+## 已知限制 / 故障排查
+
+- **上传二维码图片返回 413 Request Entity Too Large**:
+  - 原因: 反向代理（OpenResty/Nginx）默认限制请求体为 1MB。
+  - 解决: 确认反代配置中已包含 `client_max_body_size 20m;`（见 [authenticator-toolkit.conf](file:///opt/code/authenticator-toolkit-repo/deploy/openresty/authenticator-toolkit.conf)）。
+- **容器无法启动（Fail-Closed 拦截）**:
+  - 原因: 环境变量中未提供 `TOTP_ACCESS_PASSWORD` 或 `TOTP_ACCESS_PASSWORD_HASH`。
+  - 解决: 检查 `env_file`（如 `/home/xl/.hermes/.secrets/authenticator-toolkit.env`）是否配置有效口令。
+- **每日限流配额耗尽（HTTP 429）**:
+  - 原因: 单个客户端 IP 达到每日请求限额（默认 50 次）。
+  - 解决: 每日 UTC 00:00 自动重置计数；可通过调整 `RATE_LIMIT_DAILY` 环境变量提升限额。
+- **PyOTP 依赖兼容性**:
+  - 说明: Google Authenticator 大量主流服务导出 16 字符 Base32 密钥（10 字节 / 80 bits），项目显式锁定 `pyotp>=2.9.0,<2.11.0`，请勿升级至引入 NIST SP 800-63B 112 位硬校验的上游 2.11+ 版本。
+
 ## References
 
 - Protobuf 定义来自 [Aegis](https://github.com/beemdevelopment/Aegis/pull/406/files)

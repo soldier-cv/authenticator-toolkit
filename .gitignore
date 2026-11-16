@@ -1,6 +1,7 @@
-# Python
+# Python & Cache
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
 dist/
 build/
@@ -8,24 +9,36 @@ build/
 .venv/
 venv/
 env/
+.pytest_cache/
 
-# IDE
+# IDE & Editor
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# OS
+# OS & Logs
 .DS_Store
 Thumbs.db
+*.log
 
-# Environment
+# Environment & Credentials
 .env
 .env.*
+!.env.example
+*.pem
+*.key
+*.token
+credentials.json
 
 # Data
 *.db
 *.sqlite
+
+# Icons exception
+!**/favicon*.ico
+!**/favicon*.svg
+!**/favicon*.png
 
 # Docker
 qrCodes/

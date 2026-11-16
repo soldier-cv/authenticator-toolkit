@@ -189,3 +189,10 @@ def test_defensive_cleared_hash_fails_closed():
         assert app_module.verify_password(TEST_USER, TEST_PASSWORD) is False
     finally:
         app_module._EXPECTED_HASH = orig_hash
+
+
+def test_favicon_unauthenticated(client):
+    """断言 /favicon.ico 免鉴权 200 返回图标资源。"""
+    res = client.get('/favicon.ico')
+    assert res.status_code == 200
+    assert 'image' in res.content_type
