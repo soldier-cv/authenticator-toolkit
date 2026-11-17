@@ -385,7 +385,14 @@ def read_qr_from_image(image_bytes):
 
 @app.route('/favicon.ico')
 def favicon():
+    # 文件名写死，不接收用户路径，避免通过本路由做目录穿越。
     return app.send_static_file('favicon.ico')
+
+
+@app.route('/favicon.svg')
+def favicon_svg():
+    # 与 /favicon.ico 一样挂在应用层、免鉴权；浏览器标签优先用这份 SVG。
+    return app.send_static_file('favicon.svg')
 
 @app.route('/')
 @auth.login_required

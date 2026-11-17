@@ -191,8 +191,44 @@ def test_defensive_cleared_hash_fails_closed():
         app_module._EXPECTED_HASH = orig_hash
 
 
-def test_favicon_unauthenticated(client):
-    """断言 /favicon.ico 免鉴权 200 返回图标资源。"""
+def test_favicon_unauthenticated(client, auth_headers):
+    """断言 /favicon.ico 与 /favicon.svg 免鉴权 200，且路径穿越不泄露源码。"""
     res = client.get('/favicon.ico')
     assert res.status_code == 200
+    assert res.status_code != 401
     assert 'image' in res.content_type
+    assert 'html' not in res.content_type
+    assert not res.data.lstrip().lower().startswith(b'<html')
+    assert not res.data.lstrip().lower().startswith(b'<!doctype')
+    # ICO 头：reserved=0, type=1
+    assert res.data[:4] == b'\x00\x00\x01\x00'
+
+    svg = client.get('/favicon.svg')
+    assert svg.status_code == 200
+    assert svg.status_code != 401
+    assert svg.content_type.startswith('image/svg+xml')
+    assert b'<svg' in svg.data[:200]
+    assert b'<html' not in svg.data.lower()
+
+    page = client.get('/', headers=auth_headers)
+    html = page.data.decode('utf-8')
+    assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg">' in html
+    assert 'href="/favicon.ico"' in html
+
+    probes = [
+        '/favicon.ico/../../etc/passwd',
+        '/favicon.svg/../../etc/passwd',
+        '/static/../app.py',
+        '/static/..%2fapp.py',
+        '/static/%2e%2e/%2e%2e/etc/passwd',
+        '/static/favicon.svg/../../../app.py',
+    ]
+    for path in probes:
+        leaked = client.get(path)
+        body = leaked.data
+        assert b'def verify_password' not in body, path
+        assert b'TOTP_ACCESS_PASSWORD' not in body, path
+        assert b'root:x:' not in body, path
+        if leaked.status_code == 200:
+            ctype = leaked.content_type or ''
+            assert ctype.startswith('image/'), path
